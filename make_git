@@ -1,0 +1,62 @@
+#!/bin/tcsh
+if ( $#argv >= 2 && ${1} == "root" ) then # 大学などの管理者(バージョンの後に引数で「root」を追加してください)
+    set UNIV = 0
+    set SUDO = "sudo "
+    set PREFIX = ""
+    set JUSTME = ""
+else
+    hostname | fgrep ".jp" > /dev/null # ホスト名に「.jp」が入っていればサーバ(大学など)
+    if ( $? != 0 ) then 		# ローカル
+    set UNIV = 0
+    set SUDO = "sudo "
+    set PREFIX = ""
+    set JUSTME = ""
+    else				# 大学などの一般ユーザ(~/local以下にインストール)
+    set UNIV = 1
+    set PREFIX = ${HOME}/local
+    set JUSTME = "--prefix=${PREFIX}"
+    set SUDO = ""
+    endif
+endif
+set PORG = "porg"
+if ( ${UNIV} == 1 && `hostname -s` == "ssh" ) then #SSHサーバ
+    set NICE = "ionice -n 7 nice -n 19 "
+    set JOBS = ""
+else
+    set NICE = ""
+    set JOBS = " -j8"
+endif
+set RECENTVER = `git --version | sed -e 's/^git version //'`
+##################################################
+echo "リポジトリを同期して最新版の情報を取得します。"
+git fetch
+set VER = `git tag | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$' | tail -n 1 | sed "s/^v//"`
+set DIRNAME = git-${VER}
+if ( $RECENTVER == $VER ) then
+    echo "現在のバージョン${VER}は最新です。" > /dev/stderr
+    exit 2
+endif
+git checkout v${VER}
+echo "バージョン ${RECENTVER} から ${VER} に更新します。" > /dev/stderr
+make configure
+echo "configureを行います。" > /dev/stderr
+${NICE} ./configure --host=x86_64-redhat-linux --build=x86_64-redhat-linux ${JUSTME} CFLAGS="-march=core2 -O3" CFLAGS="-march=core2 -O3"
+if( $? != 0 ) then
+    echo "configure失敗" > /dev/stderr
+    exit 1
+endif
+echo "ビルドを行います。" > /dev/stderr
+${NICE} make ${JOBS}
+if( $? != 0 ) then
+    echo "ビルド失敗" > /dev/stderr
+    exit 1
+endif
+echo "現在のバージョンのアンインストールを行います。" > /dev/stderr
+${SUDO} ${NICE} ${PORG} -br git
+echo "インストールを行います。" > /dev/stderr
+${SUDO} ${NICE} ${PORG} -lp ${DIRNAME} "make install${JOBS}"
+if( $? != 0 ) then
+    echo "インストール失敗" > /dev/stderr
+    exit 1
+endif
+make clean
